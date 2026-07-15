@@ -284,18 +284,23 @@
   <!-- TAB 1 -->
   <div class="tab-content active" id="tab1">
 
-    <div class="panel" style="margin-bottom:20px;">
-      <h3>بروزرسانی زنده <span class="n">via Google Apps Script proxy</span></h3>
+    <div id="connectionBar" style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:var(--teal); border:1px solid var(--line); border-radius:10px; padding:10px 16px; margin-bottom:20px; font-size:12.5px;">
+      <div id="liveStatus" style="color:var(--paper-dim);">در حال اتصال به داده لحظه‌ای...</div>
+      <button id="settingsToggle" style="background:none; border:1px solid var(--line); color:var(--paper-dim); border-radius:6px; padding:5px 12px; font-family:'Vazirmatn'; font-size:12px; cursor:pointer;">⚙ تنظیمات اتصال</button>
+    </div>
+
+    <div class="panel" id="settingsPanel" style="margin-bottom:20px; display:none;">
+      <h3>اتصال به Google Apps Script</h3>
       <p style="font-size:12.5px;color:var(--paper-dim);line-height:1.9;margin:0 0 12px;">
-        آدرس Web App که از Apps Script گرفتی رو اینجا بذار (طبق SETUP.md). کلید brsapi هیچ‌وقت وارد این صفحه نمیشه —
-        فقط همین لینک، که خودش کلید رو سمت سرور گوگل نگه می‌داره. این آدرس هم فقط تو حافظه موقت مرورگرت می‌مونه.
+        آدرس Web App که از Apps Script گرفتی رو اینجا بذار (طبق SETUP.md). این آدرس تو مرورگر خودت ذخیره میشه تا
+        دفعه بعد که این صفحه رو باز می‌کنی، دیگه لازم نباشه دوباره واردش کنی. کلید brsapi هیچ‌وقت وارد این صفحه نمیشه.
       </p>
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center;">
         <input id="proxyUrlInput" type="text" placeholder="https://script.google.com/macros/s/XXXXXXXX/exec"
           style="flex:1; min-width:280px; background:var(--ink); border:1px solid var(--line); border-radius:8px; padding:9px 12px; color:var(--paper); font-family:'Space Mono',monospace; font-size:13px; direction:ltr;">
-        <button id="fetchLiveBtn" style="background:var(--brass-bright); color:var(--ink); border:none; border-radius:8px; padding:10px 18px; font-family:'Vazirmatn'; font-weight:700; font-size:13.5px; cursor:pointer;">دریافت قیمت لحظه‌ای</button>
+        <button id="saveConnectBtn" style="background:var(--brass-bright); color:var(--ink); border:none; border-radius:8px; padding:10px 18px; font-family:'Vazirmatn'; font-weight:700; font-size:13.5px; cursor:pointer;">ذخیره و اتصال</button>
+        <button id="forgetBtn" style="background:none; border:1px solid var(--line); color:var(--paper-dim); border-radius:8px; padding:10px 14px; font-family:'Vazirmatn'; font-size:12.5px; cursor:pointer;">فراموش کن</button>
       </div>
-      <div id="liveStatus" style="font-size:12.5px; margin-top:10px; color:var(--paper-dim);"></div>
     </div>
 
     <div class="grid-2">
@@ -358,6 +363,16 @@
       </div>
     </div>
 
+    <div class="panel" id="screenerPanel" style="margin-bottom:24px;">
+      <h3>غربالگر کل بازار <span class="n">live · all TSE symbols</span></h3>
+      <p style="font-size:12.5px;color:var(--paper-dim);line-height:1.9;margin:0 0 12px;">
+        این بخش، بعد از اتصال به Apps Script، تمام نمادهای بازار بورس و فرابورس (نه فقط پرتفوی شما) رو می‌گیره و
+        بر اساس بیشترین رشد، بیشترین افت و بیشترین ارزش معاملات مرتب می‌کنه. این یک لیست خام و بدون فیلتر تحلیلیه —
+        نه توصیه خرید. هر نماد رو قبل از تصمیم، خودتون بررسی کنید (صنعت، بنیاد، نقدشوندگی).
+      </p>
+      <div id="screenerStatus" style="font-size:12.5px; margin-bottom:14px; color:var(--paper-dim);">برای دیدن این بخش، اول از تب بالا به Apps Script وصل شو.</div>
+      <div id="screenerGrid" style="display:grid; grid-template-columns:repeat(3,1fr); gap:16px;"></div>
+    </div>
     <div class="panel" style="margin-bottom:24px;">
       <h3>آخرین اطلاعیه‌های کدال <span class="n">via Apps Script proxy</span></h3>
       <p style="font-size:12.5px;color:var(--paper-dim);line-height:1.9;margin:0 0 12px;">
@@ -565,66 +580,165 @@ try{
   });
 }catch(e){ console.error('Outlook cards failed:', e); }
 
-// ============ Live update via Google Apps Script proxy ============
-// The proxy URL is not a secret (the brsapi key stays server-side inside
-// Apps Script's Script Properties) — it's just stored here in page memory,
-// never in localStorage/sessionStorage/cookies.
-document.getElementById('fetchLiveBtn').addEventListener('click', async ()=>{
-  const proxyUrl = document.getElementById('proxyUrlInput').value.trim();
+// ============ Connection to Google Apps Script proxy ============
+// The proxy URL itself is not a secret (the brsapi key stays server-side
+// inside Apps Script's Script Properties). We remember it in localStorage
+// so the dashboard auto-loads live data on every visit without manual entry.
+const STORAGE_KEY = 'alphavision_proxy_url';
+
+function getProxyUrl(){ return localStorage.getItem(STORAGE_KEY) || ''; }
+function setProxyUrl(url){ localStorage.setItem(STORAGE_KEY, url); }
+function clearProxyUrl(){ localStorage.removeItem(STORAGE_KEY); }
+
+document.getElementById('settingsToggle').addEventListener('click', ()=>{
+  const panel = document.getElementById('settingsPanel');
+  panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+});
+
+document.getElementById('saveConnectBtn').addEventListener('click', ()=>{
+  const url = document.getElementById('proxyUrlInput').value.trim();
+  if(!url){ return; }
+  setProxyUrl(url);
+  document.getElementById('settingsPanel').style.display = 'none';
+  connectAndLoad();
+});
+
+document.getElementById('forgetBtn').addEventListener('click', ()=>{
+  clearProxyUrl();
+  document.getElementById('proxyUrlInput').value = '';
+  document.getElementById('liveStatus').textContent = 'اتصال حذف شد. دیتای ثابت (آخرین بار ذخیره‌شده) نمایش داده میشه.';
+});
+
+async function connectAndLoad(){
   const statusEl = document.getElementById('liveStatus');
-  if(!proxyUrl){ statusEl.textContent = 'لطفاً اول آدرس Web App رو وارد کن (طبق SETUP.md).'; statusEl.style.color = 'var(--rose-soft)'; return; }
+  const proxyUrl = getProxyUrl();
 
-  statusEl.textContent = 'در حال دریافت داده...';
-  statusEl.style.color = 'var(--paper-dim)';
-
-  const sep = proxyUrl.includes('?') ? '&' : '?';
-  const url = proxyUrl + sep + 'action=prices';
-
-  let data = null, err = null;
-  try{
-    const res = await fetch(url);
-    if(!res.ok) throw new Error('HTTP ' + res.status);
-    data = await res.json();
-  }catch(e){ err = e; }
-
-  if(!data || data.error){
-    statusEl.innerHTML = 'دریافت داده ناموفق بود. ' +
-      (data && data.error ? 'خطای Apps Script: ' + data.error : 'خطای فنی: ' + (err ? err.message : 'نامشخص')) +
-      '<br>چک کن که: آدرس درست کپی شده، Deploy با دسترسی «Anyone» انجام شده، و BRSAPI_KEY تو Script Properties ست شده.';
-    statusEl.style.color = 'var(--rose-soft)';
+  if(!proxyUrl){
+    statusEl.textContent = 'متصل نیست — دیتای ثابت نمایش داده میشه. برای اتصال زنده روی «⚙ تنظیمات اتصال» بزن.';
+    statusEl.style.color = 'var(--paper-dim)';
+    document.getElementById('screenerStatus').textContent = 'برای دیدن این بخش، اول به Apps Script وصل شو.';
     return;
   }
 
-  const rows = data.symbols || [];
-  let matched = 0;
+  document.getElementById('proxyUrlInput').value = proxyUrl;
+  statusEl.textContent = 'در حال دریافت قیمت لحظه‌ای...';
+  statusEl.style.color = 'var(--paper-dim)';
 
-  holdings.forEach(h=>{
-    const row = rows.find(r => r && (r.l18 === h.symbol || (r.l18||'').trim() === h.symbol.trim()));
-    if(row){
-      matched++;
-      const newPrice = Number(row.pc ?? row.pl ?? h.price);
-      const newChange = Number(row.pcp ?? row.plp ?? h.dayChange);
-      h.price = newPrice;
-      h.dayChange = newChange;
-      h.value = h.qty * newPrice;
-      h.pl = h.value - h.costBasis;
-      h.plPct = (h.pl / h.costBasis) * 100;
+  const sep = proxyUrl.includes('?') ? '&' : '?';
+
+  // 1) portfolio prices
+  try{
+    const res = await fetch(proxyUrl + sep + 'action=prices');
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error);
+
+    const rows = data.symbols || [];
+    let matched = 0;
+    holdings.forEach(h=>{
+      const row = rows.find(r => r && (r.l18||'').trim() === h.symbol.trim());
+      if(row){
+        matched++;
+        const newPrice = Number(row.pc ?? row.pl ?? h.price);
+        const newChange = Number(row.pcp ?? row.plp ?? h.dayChange);
+        h.price = newPrice; h.dayChange = newChange;
+        h.value = h.qty * newPrice;
+        h.pl = h.value - h.costBasis;
+        h.plPct = (h.pl / h.costBasis) * 100;
+      }
+    });
+    if(matched > 0){
+      const grandTotal = holdings.reduce((s,h)=>s+h.value,0);
+      holdings.forEach(h=> h.weight = (h.value/grandTotal)*100);
+      renderAll();
+      statusEl.textContent = `متصل — بروزرسانی شد (${matched}/۱۲ نماد) · ${new Date().toLocaleTimeString('fa-IR')}`;
+      statusEl.style.color = '#8fbf8a';
+    } else {
+      statusEl.textContent = 'متصل شد ولی هیچ نمادی از پرتفوی پیدا نشد — ساختار پاسخ رو چک کن.';
+      statusEl.style.color = 'var(--rose-soft)';
     }
-  });
-
-  if(matched > 0){
-    const grandTotal = holdings.reduce((s,h)=>s+h.value,0);
-    holdings.forEach(h=> h.weight = (h.value/grandTotal)*100);
-    renderAll();
-    statusEl.textContent = `بروزرسانی شد — ${matched} از ۱۲ نماد پیدا و آپدیت شد.`;
-    statusEl.style.color = '#8fbf8a';
-  } else {
-    statusEl.textContent = 'داده دریافت شد ولی هیچ نمادی از پرتفوی شما تو پاسخ پیدا نشد. ساختار پاسخ API ممکنه فرق داشته باشه.';
+  }catch(e){
+    statusEl.innerHTML = 'اتصال ناموفق: ' + e.message + '. دیتای ثابت نمایش داده میشه. آدرس رو تو تنظیمات چک کن.';
     statusEl.style.color = 'var(--rose-soft)';
   }
+
+  // 2) whole-market screener
+  loadScreener(proxyUrl, sep);
+}
+
+async function loadScreener(proxyUrl, sep){
+  const statusEl = document.getElementById('screenerStatus');
+  const grid = document.getElementById('screenerGrid');
+  statusEl.textContent = 'در حال دریافت لیست کل بازار...';
+  try{
+    const res = await fetch(proxyUrl + sep + 'action=allSymbols');
+    if(!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    if(data.error) throw new Error(data.error);
+    const rows = (data.symbols || []).filter(r => r && r.l18 && (r.pcp !== undefined || r.plp !== undefined));
+
+    if(rows.length === 0) throw new Error('پاسخ خالی بود');
+
+    const withChange = rows.map(r => ({
+      symbol: r.l18, name: r.l30 || '', changePct: Number(r.pcp ?? r.plp ?? 0),
+      value: Number(r.tval ?? r.pval ?? 0)
+    }));
+
+    const gainers = withChange.slice().sort((a,b)=>b.changePct-a.changePct).slice(0,8);
+    const losers  = withChange.slice().sort((a,b)=>a.changePct-b.changePct).slice(0,8);
+    const active  = withChange.filter(r=>r.value>0).sort((a,b)=>b.value-a.value).slice(0,8);
+
+    function renderList(title, items, colorClass){
+      const rowsHtml = items.map(it => `
+        <div style="display:flex; justify-content:space-between; padding:6px 0; border-bottom:1px solid rgba(255,255,255,0.05); font-size:12.5px;">
+          <span>${it.symbol}</span>
+          <span class="mono ${colorClass}">${fmtPct(it.changePct)}</span>
+        </div>`).join('');
+      return `<div><div style="font-size:12px;color:var(--paper-dim);margin-bottom:8px;">${title}</div>${rowsHtml}</div>`;
+    }
+
+    grid.innerHTML =
+      renderList('بیشترین رشد امروز', gainers, 'pos-text') +
+      renderList('بیشترین افت امروز', losers, 'neg-text') +
+      renderList('پرمعامله‌ترین‌ها', active, '');
+
+    statusEl.textContent = `${withChange.length} نماد از کل بازار دریافت شد · ${new Date().toLocaleTimeString('fa-IR')}`;
+    statusEl.style.color = '#8fbf8a';
+  }catch(e){
+    statusEl.textContent = 'دریافت لیست کل بازار ناموفق بود: ' + e.message;
+    statusEl.style.color = 'var(--rose-soft)';
+  }
+}
+
+document.getElementById('fetchCodalBtn').addEventListener('click', async ()=>{
+  const proxyUrl = getProxyUrl();
+  const statusEl = document.getElementById('codalStatus');
+  const listEl = document.getElementById('codalList');
+  if(!proxyUrl){ statusEl.textContent = 'اول باید از تب پرتفوی به Apps Script وصل بشی.'; statusEl.style.color = 'var(--rose-soft)'; return; }
+
+  statusEl.textContent = 'در حال دریافت اطلاعیه‌ها...';
+  listEl.innerHTML = '';
+  const sep = proxyUrl.includes('?') ? '&' : '?';
+
+  for(const h of holdings){
+    try{
+      const res = await fetch(proxyUrl + sep + 'action=codal&symbol=' + encodeURIComponent(h.symbol));
+      const data = await res.json();
+      if(data.error) continue;
+      const items = Array.isArray(data) ? data : (data.items || data.announcements || []);
+      items.slice(0,2).forEach(it=>{
+        const title = it.Title || it.title || it.subject || 'اطلاعیه جدید';
+        const date = it.PublishDateTime || it.date || '';
+        listEl.innerHTML += `<div style="padding:8px 0;border-bottom:1px solid rgba(255,255,255,0.05);"><b>${h.symbol}</b> — ${title} <span style="color:var(--paper-dim);font-size:11.5px;">${date}</span></div>`;
+      });
+    }catch(e){ /* skip symbol on error, continue with the rest */ }
+  }
+  statusEl.textContent = listEl.innerHTML ? 'بروزرسانی شد.' : 'هیچ اطلاعیه‌ای پیدا نشد یا endpoint کدال هنوز تنظیم نشده (به SETUP.md نگاه کن).';
+  statusEl.style.color = listEl.innerHTML ? '#8fbf8a' : 'var(--rose-soft)';
 });
 
 renderAll();
+connectAndLoad();
 </script>
 </body>
 </html>
